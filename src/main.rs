@@ -1,16 +1,13 @@
-fn ln_chebyshev_eval(coeffs: &[f32], num_coeffs: usize, x: f32, x_min: f32, x_max: f32) -> f32 {
-    let x_rel_2 = -2.0 + 4.0 * (x - x_min) / (x_max - x_min);
-    let mut d = 0.0;
-    let mut dd = 0.0;
-    let mut temp = 0.0;
-    for i in (1..num_coeffs).rev() {
-        temp = d;
-        d = x_rel_2 * d - dd + coeffs[i];
-        dd = temp;
-    }
-    0.5 * x_rel_2 * d - dd + 0.5 * coeffs[0]
-}
+use std::process;
 
+//consts for supply calculation and block reward
+const FRACTION: u64 = 720_720_000;
+const INIT_SUPPLY: u64 = 1_250_000_000;
+const SUPPLY_INCREASE: u64 = 100_000_000;
+const MIN_REWARD: u64 = 60;
+const SHIFT: u32 = 20;
+
+//consts for ln approximation via chebyshev polynomials
 const NUM_COEFFS: usize = 9;
 const COEFFS: [f32; NUM_COEFFS] = [
     25.012499098559037,
@@ -29,7 +26,6 @@ const X_MAX: f32 = 1000000.0;
 /// Simple Exponential Moving Average (EMA) filter in Rust
 /// 
 /// Calculates the EMA for a series of time-series data.
-
 struct EMA {
     smoothing_factor: f64,
     last_ema: Option<f64>,
@@ -58,7 +54,48 @@ impl EMA {
     }
 }
 
+fn ln_chebyshev_eval(coeffs: &[f32], num_coeffs: usize, x: f32, x_min: f32, x_max: f32) -> f32 {
+    let x_rel_2 = -2.0 + 4.0 * (x - x_min) / (x_max - x_min);
+    let mut d = 0.0;
+    let mut dd = 0.0;
+    let mut temp = 0.0;
+    for i in (1..num_coeffs).rev() {
+        temp = d;
+        d = x_rel_2 * d - dd + coeffs[i];
+        dd = temp;
+    }
+    0.5 * x_rel_2 * d - dd + 0.5 * coeffs[0]
+}
+
+fn issuance(target: u64, current_supply: &mut u64, block_reward: &mut u64) {
+    const FRACTION: u64 = 720_720_000;
+    const MIN_REWARD: u64 = 60;
+    const SHIFT: u32 = 20;
+
+    'outer: for _ in 0..10 { // Lots of years
+        for _ in 0..12 { // 1 year
+            for _ in 0..30 { // 1 month
+                for _ in 0..2880 { // 1 day
+                    *current_supply += *block_reward;
+
+                    // Update block reward
+                    if *current_supply < target {
+                        *block_reward = ((target - *current_supply) >> SHIFT) + (MIN_REWARD * FRACTION);
+                    } else {
+                        *block_reward = MIN_REWARD * FRACTION;
+                        println!("Stop!");
+                        process::exit(0);
+                    }
+                }
+            }
+            println!("Monthly Block Reward: {}", *block_reward / FRACTION);
+        }
+    }
+}
+
 fn main() {
+
+    //Approximating natural log of x_mid
     let x_mid = 0.5 * (X_MIN + X_MAX);
     //let x_mid = 100000.0;
     let value_at_x_mid = ln_chebyshev_eval(&COEFFS, NUM_COEFFS, x_mid, X_MIN, X_MAX);
@@ -68,7 +105,8 @@ fn main() {
 
     let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]; // Example time-series data
     let alpha = 0.1; // Smoothing factor
-
+    
+    //Applying an EMA (Exponential moving average) filter to a vector
     let mut ema_filter = EMA::new(alpha);
 
     println!("Time-series data: {:?}", data);
@@ -78,5 +116,15 @@ fn main() {
         let ema = ema_filter.update(*value);
         println!("Step {}: Value = {:.2}, EMA = {:.2}", i + 1, value, ema);
     }
+    
+    //Supply and block reward
+    let target: u64 = (INIT_SUPPLY + SUPPLY_INCREASE) * FRACTION;
+    let mut current_supply: u64 = INIT_SUPPLY * FRACTION;
+    let mut block_reward: u64 = ((target - current_supply) >> SHIFT) + (MIN_REWARD * FRACTION);
+    
+    println!("Initial Block Reward: {}", block_reward / FRACTION);
+
+    issuance(target, &mut current_supply, &mut block_reward);
+
 }
 
